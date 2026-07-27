@@ -281,14 +281,16 @@ for n_eval in selected_ns:
     fig = make_subplots(rows=1, cols=2, 
                         subplot_titles=(f"Std Dev (N={n_eval})", f"Range (N={n_eval})"))
     
+    algo_colors = {'Fibonacci': '#636EFA', 'Saff-Kuijlaars': '#EF553B', 'Kogan': '#00CC96'}
     for name in algos_dict.keys():
         subset = lat_df[lat_df['Algorithm'] == name]
+        color = algo_colors.get(name, '#333333')
         # Std Dev Subplot
         fig.add_trace(go.Scatter(x=subset['latitude_deg'], y=subset['std_dev'], 
-                                 mode='lines+markers', name=name, legendgroup=name), row=1, col=1)
+                                 mode='lines+markers', name=name, legendgroup=name, marker_color=color), row=1, col=1)
         # Range Subplot
         fig.add_trace(go.Scatter(x=subset['latitude_deg'], y=subset['Range'], 
-                                 mode='lines+markers', name=name, legendgroup=name, showlegend=False), row=1, col=2)
+                                 mode='lines+markers', name=name, legendgroup=name, showlegend=False, marker_color=color), row=1, col=2)
     
     fig.update_layout(title_text=f"Latitudinal Distribution Analysis for N={n_eval}", height=450)
     fig.update_xaxes(title_text="Latitude (degrees)")
