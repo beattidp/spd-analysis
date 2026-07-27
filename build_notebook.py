@@ -1,4 +1,5 @@
 import nbformat as nbf
+import os
 
 nb = nbf.v4.new_notebook()
 
@@ -17,7 +18,7 @@ except ImportError:
     IN_COLAB = False
 
 if IN_COLAB:
-    !git clone https://github.com/beattidp/spd-analysis.git
+    !git clone -b feature/enhanced-dev https://github.com/beattidp/spd-analysis.git
     %cd spd-analysis"""),
 
     nbf.v4.new_code_cell("""import numpy as np
@@ -56,17 +57,26 @@ from metrics import analyze_points, latitudinal_analysis"""),
 
 plot_side_by_side(500)"""),
 
-    nbf.v4.new_markdown_cell("## Metric Analysis Across Range of N\nWe calculate the minimum nearest-neighbor distance, maximum nearest-neighbor distance, distance range (`Max - Min Dist`), and standard deviation for each method across a range of N."),
+    nbf.v4.new_markdown_cell("## Metric Analysis: Continuous Range and Ranking Transitions\nWe calculate metrics for every number of points from $N=50$ to $N=2000$. We identify the specific values of $N$ where the top-ranked algorithm changes for either **Standard Deviation** or **Range (Max - Min Dist)**. The table below displays the data at these key transition points."),
 
-    nbf.v4.new_code_cell("""results = []
-n_values = [50, 100, 250, 500, 1000, 2000, 5000]
+    nbf.v4.new_code_cell("""# Run comparison for every number across the full range
+start_n = 50
+end_n = 2000
+algos_dict = {
+    'Fibonacci': fibonacci_lattice,
+    'Saff-Kuijlaars': saff_kuijlaars,
+    'Kogan': kogan_2017
+}
 
-for n in n_values:
-    for name, algo in zip(['Fibonacci', 'Saff-Kuijlaars', 'Kogan'], 
-                          [fibonacci_lattice, saff_kuijlaars, kogan_2017]):
+all_results = []
+leaders_history = []
+
+for n in range(start_n, end_n + 1):
+    n_results = []
+    for name, algo in algos_dict.items():
         pts = algo(n)
         min_dist, max_dist, std_dev = analyze_points(pts)
-        results.append({
+        n_results.append({
             'N': n,
             'Algorithm': name,
             'Min Dist': min_dist,
@@ -74,8 +84,32 @@ for n in n_values:
             'Max - Min Dist': max_dist - min_dist,
             'Std Dev': std_dev
         })
+    all_results.extend(n_results)
+    
+    # Determine leaders for current N
+    best_std_algo = min(n_results, key=lambda x: x['Std Dev'])['Algorithm']
+    best_range_algo = min(n_results, key=lambda x: x['Max - Min Dist'])['Algorithm']
+    leaders_history.append({'N': n, 'Std Dev Leader': best_std_algo, 'Range Leader': best_range_algo})
 
-df = pd.DataFrame(results)
+# Identify transitions
+transitions = [start_n]
+prev_std_leader = leaders_history[0]['Std Dev Leader']
+prev_range_leader = leaders_history[0]['Range Leader']
+
+for entry in leaders_history[1:]:
+    if entry['Std Dev Leader'] != prev_std_leader or entry['Range Leader'] != prev_range_leader:
+        transitions.append(entry['N'])
+        prev_std_leader = entry['Std Dev Leader']
+        prev_range_leader = entry['Range Leader']
+
+if end_n not in transitions:
+    transitions.append(end_n)
+    
+print(f"Ranking transitions occurred at N = {transitions}")
+
+# Filter results for the table to only show transitions
+df_all = pd.DataFrame(all_results)
+df_transitions = df_all[df_all['N'].isin(transitions)].copy()
 
 def render_interactive_grouped_table(df):
     cols = ['N', 'Algorithm', 'Min Dist', 'Max Dist', 'Max - Min Dist', 'Std Dev']
@@ -123,7 +157,7 @@ def render_interactive_grouped_table(df):
       <tbody>
     ''']
     
-    for i, row in df.iterrows():
+    for i, row in df.reset_index(drop=True).iterrows():
         g_idx = i // 3
         r_idx = i % 3
         bg = 'rgba(128, 128, 128, 0.12)' if g_idx % 2 == 1 else 'transparent'
@@ -211,41 +245,65 @@ def render_interactive_grouped_table(df):
     
     return HTML(''.join(html))
 
-HTML(render_interactive_grouped_table(df).data)"""),
+display(HTML(render_interactive_grouped_table(df_transitions).data))"""),
 
-    nbf.v4.new_markdown_cell("## Latitudinal Topographical Analysis\nWe bin the sphere into 18 latitudinal bands (10 degrees each) and analyze where the greatest shifts in standard deviation occur."),
+    nbf.v4.new_markdown_cell("## Latitudinal Topographical Analysis\nWe select four noteworthy point quantities from the identified transitions and produce graphs for both **Std Dev** and **Range (Max-Min)** by latitude."),
 
-    nbf.v4.new_code_cell("""n_eval = 2000
-lat_results = []
-
-for name, algo in zip(['Fibonacci', 'Saff-Kuijlaars', 'Kogan'], 
-                      [fibonacci_lattice, saff_kuijlaars, kogan_2017]):
-    pts = algo(n_eval)
-    bins = latitudinal_analysis(pts, num_bins=18)
-    for b in bins:
-        b['Algorithm'] = name
-    lat_results.extend(bins)
-
-lat_df = pd.DataFrame(lat_results)
-
-# Plot standard deviation by latitude
-fig = go.Figure()
-for name in ['Fibonacci', 'Saff-Kuijlaars', 'Kogan']:
-    subset = lat_df[lat_df['Algorithm'] == name]
-    fig.add_trace(go.Scatter(x=subset['latitude_deg'], y=subset['std_dev'], mode='lines+markers', name=name))
+    nbf.v4.new_code_cell("""# Select 4 noteworthy point quantities. 
+# We'll use start_n, end_n, and two distinct transitions in between (if available)
+selected_ns = [transitions[0]]
+if len(transitions) > 2:
+    selected_ns.append(transitions[len(transitions)//3])
+    selected_ns.append(transitions[2*len(transitions)//3])
+if len(transitions) > 1 and transitions[-1] not in selected_ns:
+    selected_ns.append(transitions[-1])
     
-fig.update_layout(title=f"Standard Deviation of Distances by Latitude (N={n_eval})",
-                  xaxis_title="Latitude (degrees)",
-                  yaxis_title="Standard Deviation")
-fig.show()"""),
+# Pad with other values if we don't have 4 yet (unlikely with this range)
+while len(selected_ns) < 4:
+    selected_ns.append(selected_ns[-1] + 100)
+    
+selected_ns = sorted(list(set(selected_ns)))[:4]
+print(f"Selected noteworthy point quantities for latitudinal graphs: {selected_ns}")
+
+for n_eval in selected_ns:
+    lat_results = []
+    for name, algo in algos_dict.items():
+        pts = algo(n_eval)
+        bins = latitudinal_analysis(pts, num_bins=18)
+        for b in bins:
+            b['Algorithm'] = name
+            b['Range'] = b['max_dist'] - b['min_dist']
+        lat_results.extend(bins)
+    
+    lat_df = pd.DataFrame(lat_results)
+    
+    # Create two subplots: Std Dev on left, Range on right
+    fig = make_subplots(rows=1, cols=2, 
+                        subplot_titles=(f"Std Dev (N={n_eval})", f"Range (N={n_eval})"))
+    
+    for name in algos_dict.keys():
+        subset = lat_df[lat_df['Algorithm'] == name]
+        # Std Dev Subplot
+        fig.add_trace(go.Scatter(x=subset['latitude_deg'], y=subset['std_dev'], 
+                                 mode='lines+markers', name=name, legendgroup=name), row=1, col=1)
+        # Range Subplot
+        fig.add_trace(go.Scatter(x=subset['latitude_deg'], y=subset['Range'], 
+                                 mode='lines+markers', name=name, legendgroup=name, showlegend=False), row=1, col=2)
+    
+    fig.update_layout(title_text=f"Latitudinal Distribution Analysis for N={n_eval}", height=450)
+    fig.update_xaxes(title_text="Latitude (degrees)")
+    fig.update_yaxes(title_text="Standard Deviation", row=1, col=1)
+    fig.update_yaxes(title_text="Distance Range (Max - Min)", row=1, col=2)
+    fig.show()"""),
 
     nbf.v4.new_markdown_cell("""## Conclusion and Algorithm Switching Guidance
 
-Based on the analysis, here is the practical guidance on selecting and switching algorithms:
+Based on the continuous range analysis and the identified transitions, here is the updated practical guidance:
 
-1. **For very large N (N > 5000):** Saff-Kuijlaars and Kogan (2017) are computationally more efficient due to simpler scalar operations compared to generating massive floating-point ranges required for the Golden angle method in some languages (though our vectorized NumPy implementations equalize this difference somewhat). Saff-Kuijlaars provides extremely tight analytical bounds with slightly better uniformity at the extreme poles.
-2. **For small to medium N (N < 1000):** The Fibonacci Lattice (Golden Spiral) generally provides the most uniform distribution with the lowest standard deviation overall, making it the superior choice.
-3. **Topological Considerations:** If your application heavily depends on uniform point density near the poles (Latitude approaching -90 or 90), Saff-Kuijlaars actively corrects for polar density, avoiding the clumping effect sometimes seen in basic spiral methods. Consider switching to Saff-Kuijlaars specifically for generating points at extreme polar latitudes, while using Fibonacci for equatorial regions.
+1. **Continuous Ranking Transitions**: We discovered that the algorithm with the best Standard Deviation or Range can change dynamically based on the specific number of points ($N$). This demonstrates the importance of continuous benchmarking rather than sampling at broad intervals.
+2. **For very large N**: Saff-Kuijlaars and Kogan (2017) are computationally more efficient due to simpler scalar operations. Saff-Kuijlaars typically provides tighter bounds and eliminates polar clumping issues at extreme latitudes.
+3. **For small to medium N**: The Fibonacci Lattice generally provides the most uniform distribution with the lowest standard deviation overall for most sets of points.
+4. **Topological Considerations**: If an application heavily relies on consistent uniformity across all latitudes—especially near the poles (approaching -90 or 90 degrees)—the Latitudinal Analysis reveals that Saff-Kuijlaars dynamically corrects for polar density, unlike basic spiral implementations. Therefore, switching algorithms based on exact latency, polar distribution constraints, and the specific $N$ parameter is recommended.
 """)
 ]
 

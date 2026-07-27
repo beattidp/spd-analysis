@@ -73,14 +73,20 @@ def latitudinal_analysis(points, num_bins=18):
         if len(pts_in_bin) > 0:
             std_dev = float(np.std(pts_in_bin))
             mean_dist = float(np.mean(pts_in_bin))
+            min_d = float(np.min(pts_in_bin))
+            max_d = float(np.max(pts_in_bin))
         else:
             std_dev = np.nan
             mean_dist = np.nan
+            min_d = np.nan
+            max_d = np.nan
             
         results.append({
             "latitude_deg": lat_deg,
             "std_dev": std_dev,
             "mean_dist": mean_dist,
+            "min_dist": min_d,
+            "max_dist": max_d,
             "count": len(pts_in_bin)
         })
         
